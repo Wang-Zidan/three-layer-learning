@@ -1,6 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { loadSettings } from '../services/storage.js';
 import { parseFile } from '../services/fileParser.js';
+import { recommendForms, FORM_TYPES, formThumbSVG } from '../utils/forms.js';
 import { COLORS } from '../constants.js';
 
 function formatTime(ts) {
@@ -19,25 +20,46 @@ export default function LandingPage({
   onDeleteSubject,
 }) {
   const [subject, setSubject] = useState('');
+  const [goal, setGoal] = useState('');
+  const [formType, setFormType] = useState('radial');
+  const [formTouched, setFormTouched] = useState(false);
+
   const [showSource, setShowSource] = useState(false);
   const [sourceText, setSourceText] = useState('');
   const [sourceLabel, setSourceLabel] = useState('');
   const [sourceLoading, setSourceLoading] = useState(false);
   const [sourceError, setSourceError] = useState('');
+
+  const [sections, setSections] = useState([]);
+  const [selectedSections, setSelectedSections] = useState(null); // null = 全选
+
   const fileInputRef = useRef(null);
 
   const settings = loadSettings();
   const missingKey = !settings.apiKey;
   const hasSource = sourceText.trim().length > 0;
 
+  // 纯规则推荐：根据学习目的关键词给出首选形态（用户未手动选过时自动跟随）。
+  const recommended = recommendForms(goal);
+  useEffect(() => {
+    if (!formTouched) setFormType(recommended[0]);
+  }, [recommended[0], formTouched]);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     const s = subject.trim();
     if (!s || missingKey || loading) return;
-    onGenerate(s, hasSource ? sourceText.trim() : '');
+    let effSource = sourceText.trim();
+    if (sections.length > 1 && selectedSections) {
+      effSource = sections
+        .filter((_, i) => selectedSections.has(i))
+        .map((x) => x.text)
+        .join('\n\n')
+        .trim();
+    }
+    onGenerate(s, effSource, goal.trim(), formType);
   };
 
-  // 处理文件上传
   const handleFile = async (file) => {
     if (!file) return;
     setSourceLoading(true);
@@ -48,10 +70,19 @@ export default function LandingPage({
       setSourceLabel(
         `${result.fileName} · ${result.wordCount} 字${result.truncated ? '（已截断）' : ''}`
       );
+      setSections(result.sections || []);
+      setSelectedSections(null);
+      // 用户还没填标题时，自动用文件名（去掉扩展名）作为学科/资料标题
+      if (!subject.trim()) {
+        const base = (result.fileName || '').replace(/\.[^.]+$/, '');
+        if (base) setSubject(base);
+      }
     } catch (err) {
       setSourceError(err.message || '解析文件失败');
       setSourceText('');
       setSourceLabel('');
+      setSections([]);
+      setSelectedSections(null);
     } finally {
       setSourceLoading(false);
     }
@@ -61,8 +92,21 @@ export default function LandingPage({
     setSourceText('');
     setSourceLabel('');
     setSourceError('');
+    setSections([]);
+    setSelectedSections(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
+
+  const toggleSection = (i) => {
+    setSelectedSections((prev) => {
+      const next = new Set(prev || sections.map((_, j) => j));
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  };
+
+  const selectedCount = selectedSections ? selectedSections.size : sections.length;
 
   return (
     <div
@@ -83,29 +127,73 @@ export default function LandingPage({
           三层学习法
         </h1>
         <p style={{ color: COLORS.textSecondary, marginBottom: 36, fontSize: 15, textAlign: 'center' }}>
-          输入任意学科，AI 帮你生成一张可探索的三层知识地图。
+          上传资料 + 说明目的，AI 帮你生成一张贴合你需求的多形态知识地图。
         </p>
 
         <form onSubmit={handleSubmit}>
+          {/* 学科 / 资料标题（上传后自动填文件名，可改） */}
           <input
             type="text"
             value={subject}
             onChange={(e) => setSubject(e.target.value)}
-            placeholder="例如：现代管理学、机器学习、宏观经济学"
+            placeholder="学科 / 资料标题（上传文件后自动填文件名）"
             disabled={loading}
-            style={{
-              width: '100%',
-              padding: '14px 18px',
-              fontSize: 16,
-              borderRadius: 8,
-              border: `1px solid ${COLORS.border}`,
-              background: COLORS.panel,
-              color: COLORS.textPrimary,
-              outline: 'none',
-              boxSizing: 'border-box',
-              marginBottom: 12,
-            }}
+            style={inputStyle}
           />
+
+          {/* 学习目的（驱动 AI 围绕你的目标组织框架） */}
+          <textarea
+            value={goal}
+            onChange={(e) => setGoal(e.target.value)}
+            placeholder="学习目的（可选）：你想从这份资料里得到什么？例如：帮我梳理期末考点 / 只弄懂第一章的定义和证明 / 了解发展脉络"
+            disabled={loading}
+            style={{ ...inputStyle, minHeight: 64, padding: '12px 18px', resize: 'vertical', fontFamily: 'inherit' }}
+          />
+
+          {/* 图谱形态建议（纯规则） */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 8 }}>
+              图谱形态（AI 根据你的目的推荐，可改）
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {recommended.map((key, idx) => {
+                const f = FORM_TYPES[key];
+                const isSel = formType === key;
+                const isRec = idx === 0;
+                return (
+                  <div
+                    key={key}
+                    onClick={() => {
+                      setFormType(key);
+                      setFormTouched(true);
+                    }}
+                    style={{
+                      flex: '1 1 150px',
+                      minWidth: 150,
+                      padding: 10,
+                      borderRadius: 8,
+                      border: `1px solid ${isSel ? COLORS.accent : COLORS.border}`,
+                      background: isSel ? 'rgba(79,140,255,0.10)' : COLORS.panel,
+                      cursor: 'pointer',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <div
+                      style={{ display: 'flex', justifyContent: 'center', marginBottom: 6 }}
+                      dangerouslySetInnerHTML={{ __html: formThumbSVG(key) }}
+                    />
+                    <div style={{ fontSize: 13, fontWeight: 500, textAlign: 'center' }}>
+                      {f.label}
+                      {isRec && <span style={{ color: COLORS.accent }}> · 推荐</span>}
+                    </div>
+                    <div style={{ fontSize: 11, color: COLORS.textSecondary, textAlign: 'center', marginTop: 2, lineHeight: 1.4 }}>
+                      {f.desc}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
           {/* 资料来源（可选）：折叠区域 */}
           <div style={{ marginBottom: 16 }}>
@@ -149,6 +237,8 @@ export default function LandingPage({
                     setSourceText(e.target.value);
                     setSourceLabel(e.target.value.trim() ? `粘贴文本 · ${e.target.value.trim().length} 字` : '');
                     setSourceError('');
+                    setSections([]);
+                    setSelectedSections(null);
                   }}
                   placeholder="直接粘贴文字内容（如教材章节、笔记、PPT 文字版）…"
                   disabled={sourceLoading}
@@ -173,32 +263,12 @@ export default function LandingPage({
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={sourceLoading}
-                    style={{
-                      padding: '8px 14px',
-                      fontSize: 13,
-                      borderRadius: 6,
-                      border: `1px solid ${COLORS.border}`,
-                      background: 'transparent',
-                      color: COLORS.textPrimary,
-                      cursor: sourceLoading ? 'wait' : 'pointer',
-                    }}
+                    style={smallBtn}
                   >
                     {sourceLoading ? '解析中…' : '选择文件'}
                   </button>
                   {hasSource && (
-                    <button
-                      type="button"
-                      onClick={clearSource}
-                      style={{
-                        padding: '8px 14px',
-                        fontSize: 13,
-                        borderRadius: 6,
-                        border: `1px solid ${COLORS.border}`,
-                        background: 'transparent',
-                        color: COLORS.textSecondary,
-                        cursor: 'pointer',
-                      }}
-                    >
+                    <button type="button" onClick={clearSource} style={smallBtn}>
                       清除
                     </button>
                   )}
@@ -216,13 +286,38 @@ export default function LandingPage({
                 />
 
                 {sourceError && (
-                  <div style={{ marginTop: 8, color: '#F87171', fontSize: 13 }}>
-                    {sourceError}
+                  <div style={{ marginTop: 8, color: '#F87171', fontSize: 13 }}>{sourceError}</div>
+                )}
+
+                {/* 章节勾选 */}
+                {sections.length > 1 && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{ fontSize: 13, color: COLORS.textSecondary, marginBottom: 6 }}>
+                      勾选要纳入图谱的章节（已选 {selectedCount} / {sections.length}）
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 160, overflowY: 'auto' }}>
+                      {sections.map((sec, i) => (
+                        <label
+                          key={i}
+                          style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedSections ? selectedSections.has(i) : true}
+                            onChange={() => toggleSection(i)}
+                          />
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {sec.title}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 )}
+
                 {hasSource && (
                   <div style={{ marginTop: 8, color: COLORS.accent, fontSize: 12 }}>
-                    ✓ 图谱将基于这份资料生成，而非 AI 凭空编造。
+                    ✓ 图谱将基于你勾选的资料生成，而非 AI 凭空编造；并会优先贴合你的学习目的。
                   </div>
                 )}
               </div>
@@ -310,16 +405,7 @@ export default function LandingPage({
                   </div>
                   <button
                     onClick={() => onOpenSubject(h.key)}
-                    style={{
-                      padding: '6px 14px',
-                      borderRadius: 6,
-                      border: 'none',
-                      background: COLORS.accent,
-                      color: '#fff',
-                      cursor: 'pointer',
-                      fontSize: 13,
-                      marginLeft: 8,
-                    }}
+                    style={{ ...smallBtn, background: COLORS.accent, color: '#fff', border: 'none' }}
                   >
                     打开
                   </button>
@@ -329,16 +415,7 @@ export default function LandingPage({
                         onDeleteSubject(h.key);
                       }
                     }}
-                    style={{
-                      padding: '6px 10px',
-                      borderRadius: 6,
-                      border: `1px solid ${COLORS.border}`,
-                      background: 'transparent',
-                      color: COLORS.textSecondary,
-                      cursor: 'pointer',
-                      fontSize: 13,
-                      marginLeft: 8,
-                    }}
+                    style={{ ...smallBtn, marginLeft: 8 }}
                   >
                     删除
                   </button>
@@ -351,3 +428,26 @@ export default function LandingPage({
     </div>
   );
 }
+
+const inputStyle = {
+  width: '100%',
+  padding: '14px 18px',
+  fontSize: 16,
+  borderRadius: 8,
+  border: `1px solid ${COLORS.border}`,
+  background: COLORS.panel,
+  color: COLORS.textPrimary,
+  outline: 'none',
+  boxSizing: 'border-box',
+  marginBottom: 12,
+};
+
+const smallBtn = {
+  padding: '8px 14px',
+  fontSize: 13,
+  borderRadius: 6,
+  border: `1px solid ${COLORS.border}`,
+  background: 'transparent',
+  color: COLORS.textPrimary,
+  cursor: 'pointer',
+};

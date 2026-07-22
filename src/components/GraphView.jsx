@@ -6,7 +6,72 @@ function hasChildren(node, all) {
   return all.some((n) => n.parentId === node.id);
 }
 
-export default function GraphView({ graph, collapsed, progress, onSelect, onToggleCollapse }) {
+// 层级布局：根在顶，第二层横向铺开，第三层在各自父节点下方。
+// 同时设置 x/y 与 fx/fy：x/y 供首帧直接渲染，fx/fy 固定位置不被力导移动。
+function layoutHierarchy(all) {
+  const root = all.find((n) => n.level === 1) || all[0];
+  const l2 = all.filter((n) => n.level === 2);
+  const dx2 = 170;
+  if (root && root.fx === undefined) {
+    root.x = 0;
+    root.y = 0;
+    root.fx = 0;
+    root.fy = 0;
+  }
+  l2.forEach((n, i) => {
+    if (n.fx === undefined) {
+      n.x = (i - (l2.length - 1) / 2) * dx2;
+      n.y = 140;
+      n.fx = n.x;
+      n.fy = 140;
+    }
+  });
+  const dx3 = 110;
+  l2.forEach((p) => {
+    const kids = all.filter((n) => n.parentId === p.id && n.level === 3);
+    kids.forEach((k, j) => {
+      if (k.fx === undefined) {
+        k.x = p.fx + (j - (kids.length - 1) / 2) * dx3;
+        k.y = 280;
+        k.fx = k.x;
+        k.fy = 280;
+      }
+    });
+  });
+}
+
+// 时间轴布局：按 time 字段（或层级/id）横向排开。
+function layoutTimeline(all) {
+  const sorted = [...all].sort((a, b) => {
+    const ta = a.time ? String(a.time) : '';
+    const tb = b.time ? String(b.time) : '';
+    if (ta && tb) return ta.localeCompare(tb, undefined, { numeric: true });
+    if (ta && !tb) return -1;
+    if (!ta && tb) return 1;
+    if (a.level !== b.level) return a.level - b.level;
+    return a.id.localeCompare(b.id);
+  });
+  const dx = 150;
+  const cx = -((sorted.length - 1) / 2) * dx;
+  sorted.forEach((n, i) => {
+    if (n.fx === undefined) {
+      n.x = cx + i * dx;
+      n.y = 60 + (n.level - 1) * 70;
+      n.fx = n.x;
+      n.fy = n.y;
+    }
+  });
+}
+
+export default function GraphView({
+  graph,
+  formType = 'radial',
+  collapsed,
+  progress,
+  onSelect,
+  onToggleCollapse,
+  onDragNode,
+}) {
   const fgRef = useRef();
   const wrapRef = useRef();
   const [size, setSize] = useState({ w: 800, h: 600 });
@@ -29,6 +94,15 @@ export default function GraphView({ graph, collapsed, progress, onSelect, onTogg
 
   const all = graph.nodes;
   const byId = useMemo(() => Object.fromEntries(all.map((n) => [n.id, n])), [all]);
+
+  // 形态布局：非辐射形态按规则固定坐标（仅在用户未拖拽过时设置，保留手动拖动结果）。
+  useEffect(() => {
+    if (!all || all.length === 0) return;
+    if (formType === 'hierarchy') layoutHierarchy(all);
+    else if (formType === 'timeline') layoutTimeline(all);
+    // 首帧直接按设定坐标渲染，并强制重绘。
+    if (fgRef.current && fgRef.current.refresh) fgRef.current.refresh();
+  }, [all, formType, byId]);
 
   // 根据 collapsed 计算可见节点与连线（隐藏被折叠节点的后代）
   const visible = useMemo(() => {
@@ -76,8 +150,10 @@ export default function GraphView({ graph, collapsed, progress, onSelect, onTogg
         backgroundColor={COLORS.bg}
         linkColor={() => COLORS.link}
         linkWidth={1}
-        cooldownTicks={120}
+        cooldownTicks={formType === 'radial' ? 120 : 0}
+        warmupTicks={formType === 'radial' ? 0 : 1}
         onNodeClick={handleClick}
+        onNodeDragEnd={(node) => onDragNode && onDragNode(node.id, node.x, node.y)}
         nodeLabel={(n) => n.label}
         nodePointerAreaPaint={(node, color, ctx) => {
           const r = LEVEL_RADIUS[node.level];

@@ -65,8 +65,34 @@ async function parsePptx(file) {
   return text.trim();
 }
 
+// 把纯文本切成「章节」列表，供用户勾选范围。
+// 启发式：短行 + 符合标题模式（#、第X章、Chapter、1. 等）即视为章节标题。
+// 章节不足 1 个时返回 []（不展示勾选）。
+function splitSections(text) {
+  const lines = (text || '').split(/\r?\n/);
+  const headingRe =
+    /^(#{1,6}\s+|第[一二三四五六七八九十百0-9]+[章节目部分卷篇]\s*|chapter\s+\d+|^\d+(\.\d+)*[\.、\s])/i;
+  const secs = [];
+  let cur = null;
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+    const isHeading =
+      headingRe.test(t) && t.length <= 50 && !/[。！？!?，,]/.test(t);
+    if (isHeading) {
+      if (cur) secs.push(cur);
+      cur = { title: t.slice(0, 40), text: '' };
+    } else {
+      if (!cur) cur = { title: '全文', text: '' };
+      cur.text += t + '\n';
+    }
+  }
+  if (cur) secs.push(cur);
+  return secs.length > 1 ? secs : [];
+}
+
 // 统一入口：根据文件类型分发到对应解析器。
-// 返回 { text, fileName, wordCount }。
+// 返回 { text, fileName, wordCount, sections }。
 export async function parseFile(file) {
   const name = (file.name || '').toLowerCase();
   let text = '';
@@ -94,5 +120,6 @@ export async function parseFile(file) {
     text = text.slice(0, MAX_CHARS);
     truncated = true;
   }
-  return { text, fileName: file.name, wordCount: text.length, truncated };
+  const sections = splitSections(text);
+  return { text, fileName: file.name, wordCount: text.length, truncated, sections };
 }

@@ -69,12 +69,12 @@ export default function App() {
     persistCurrent(currentKey);
   }, [currentKey]);
 
-  const generateGraph = async (subject, sourceText) => {
+  const generateGraph = async (subject, sourceText, goal = '', formType = 'radial') => {
     setLoading(true);
     setError('');
     const key = toSubjectKey(subject);
     try {
-      const prompt = buildMapPromptWithSource(sourceText);
+      const prompt = buildMapPromptWithSource(sourceText, { goal, formType });
       const raw = await callLLM(
         [
           { role: 'system', content: prompt },
@@ -91,6 +91,10 @@ export default function App() {
       }
 
       validateGraph(parsed);
+      // 记录本图谱的形态与目的，供布局与展示使用（不影响冻结的节点契约）。
+      parsed.formType = formType;
+      parsed.goal = goal || '';
+      parsed.subject = subject;
       const created = makeSubject(subject);
       created.graph = parsed;
       setSubjects((prev) => ({ ...prev, [key]: created }));
@@ -100,6 +104,93 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // ---------- 手动编辑（C 阶段）：增 / 删 / 改 / 拖拽 ----------
+  const nextNodeId = (nodes) => {
+    let max = 0;
+    nodes.forEach((n) => {
+      const m = /^n(\d+)$/.exec(n.id);
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    });
+    return 'n' + (max + 1);
+  };
+
+  const addChild = (parentId, label) => {
+    const text = (label || '').trim();
+    if (!text || !currentKey) return;
+    patchCur((c) => {
+      const g = c.graph;
+      if (!g) return {};
+      const parent = g.nodes.find((n) => n.id === parentId);
+      if (!parent) return {};
+      const newId = nextNodeId(g.nodes);
+      const newNode = {
+        id: newId,
+        label: text,
+        level: (parent.level || 1) + 1,
+        parentId,
+        isLeaf: true,
+      };
+      const nodes = g.nodes
+        .map((n) => (n.id === parentId ? { ...n, isLeaf: false } : n))
+        .concat(newNode);
+      return { graph: { ...g, nodes }, selectedId: newId };
+    });
+  };
+
+  const deleteNode = (id) => {
+    if (!currentKey) return;
+    patchCur((c) => {
+      const g = c.graph;
+      if (!g) return {};
+      const toRemove = new Set([id]);
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const n of g.nodes) {
+          if (n.parentId && toRemove.has(n.parentId) && !toRemove.has(n.id)) {
+            toRemove.add(n.id);
+            changed = true;
+          }
+        }
+      }
+      const nodes = g.nodes.filter((n) => !toRemove.has(n.id));
+      const progress = {};
+      const chats = {};
+      const cards = {};
+      const notes = {};
+      nodes.forEach((n) => {
+        if (c.progress[n.id]) progress[n.id] = c.progress[n.id];
+        if (c.chats[n.id]) chats[n.id] = c.chats[n.id];
+        if (c.cards[n.id]) cards[n.id] = c.cards[n.id];
+        if (c.notes[n.id]) notes[n.id] = c.notes[n.id];
+      });
+      const selectedId = c.selectedId && toRemove.has(c.selectedId) ? null : c.selectedId;
+      const collapsed = c.collapsed.filter((x) => !toRemove.has(x));
+      return { graph: { ...g, nodes }, progress, chats, cards, notes, selectedId, collapsed };
+    });
+  };
+
+  const renameNode = (id, label) => {
+    const text = (label || '').trim();
+    if (!text || !currentKey) return;
+    patchCur((c) => {
+      const g = c.graph;
+      if (!g) return {};
+      const nodes = g.nodes.map((n) => (n.id === id ? { ...n, label: text } : n));
+      return { graph: { ...g, nodes } };
+    });
+  };
+
+  const dragNode = (id, x, y) => {
+    if (!currentKey) return;
+    patchCur((c) => {
+      const g = c.graph;
+      if (!g) return {};
+      const nodes = g.nodes.map((n) => (n.id === id ? { ...n, x, y, fx: x, fy: y } : n));
+      return { graph: { ...g, nodes } };
+    });
   };
 
   const setStatus = (id, key) => patchCur((c) => ({ progress: { ...c.progress, [id]: key } }));
@@ -336,10 +427,12 @@ export default function App() {
         <div style={{ width: isMobile ? '100%' : '70%', minWidth: 0 }}>
           <GraphView
             graph={graph}
+            formType={graph.formType || 'radial'}
             collapsed={collapsed}
             progress={progress}
             onSelect={handleSelect}
             onToggleCollapse={toggleCollapse}
+            onDragNode={dragNode}
           />
         </div>
         {!isMobile && (
@@ -366,6 +459,9 @@ export default function App() {
               onCardLoaded={handleCardLoaded}
               notes={notes}
               onNoteChange={handleNoteChange}
+              onRenameNode={renameNode}
+              onDeleteNode={deleteNode}
+              onAddChild={addChild}
             />
           </div>
         )}
@@ -437,6 +533,9 @@ export default function App() {
               onCardLoaded={handleCardLoaded}
               notes={notes}
               onNoteChange={handleNoteChange}
+              onRenameNode={renameNode}
+              onDeleteNode={deleteNode}
+              onAddChild={addChild}
             />
           </div>
         </div>
