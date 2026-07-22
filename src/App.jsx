@@ -69,14 +69,15 @@ export default function App() {
     persistCurrent(currentKey);
   }, [currentKey]);
 
-  const generateGraph = async (subject) => {
+  const generateGraph = async (subject, sourceText) => {
     setLoading(true);
     setError('');
     const key = toSubjectKey(subject);
     try {
+      const prompt = buildMapPromptWithSource(sourceText);
       const raw = await callLLM(
         [
-          { role: 'system', content: MAP_PROMPT },
+          { role: 'system', content: prompt },
           { role: 'user', content: subject },
         ],
         { jsonMode: true, timeout: 60000 }

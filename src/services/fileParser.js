@@ -14,10 +14,12 @@ function readAsText(file) {
 // 解析 PDF：用 pdfjs-dist 在浏览器端提取文字。
 // 动态导入避免首屏加载全部解析库。
 async function parsePDF(file) {
-  const pdfjs = await import('pdfjs-dist/build/pdf.mjs');
-  // 用 Vite 友好的 worker 设置方式
-  const pdfjsWorker = await import('pdfjs-dist/build/pdf.worker.mjs');
-  pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+  const pdfjs = await import('pdfjs-dist');
+  // Vite 原生支持 new URL + import.meta.url 方式加载 worker
+  pdfjs.GlobalWorkerOptions.workerPort = new Worker(
+    new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url),
+    { type: 'module' }
+  );
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise;
