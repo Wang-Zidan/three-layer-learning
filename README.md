@@ -1,6 +1,6 @@
 # 三层学习法 · 交互式知识探索网站
 
-> 当前进度：**Phase 0 → 5 已完成**（界面、AI 生成图谱、真实对话、真实卡片、本地持久化、手机端响应式、导入/导出备份）。
+> 当前进度：**Phase 0 → 5 + 上传资料功能已完成**（界面、AI 生成图谱、真实对话、真实卡片、本地持久化、手机端响应式、导入/导出备份、多学科历史、**上传资料生成图谱**）。
 
 ## 怎么跑起来
 
@@ -93,6 +93,7 @@ cmd /c npm run dev
 1. 启动后看到首页，先点右上角 **「⚙ 设置」**。
 2. 填入你的阿里云百炼 API Key（base_url 和 model 已有默认值，一般不用改）。
 3. 保存后回到首页，输入学科名（如"金融风控"），点「生成知识地图」。
+   - **（可选）上传资料**：点「📎 上传资料」展开后，可粘贴文本或上传 `.txt` / `.pdf` / `.docx` / `.pptx` 文件。上传后 AI 会**基于你的资料**生成图谱，而非凭空编造——适合期末复习上传老师 PPT、上传教材某章生成知识地图。
 4. AI 生成三层图谱后：
    - 左侧力导向图，**节点大小=层级、颜色=掌握状态**（灰=未学、蓝=学习中、绿=已掌握）。
    - 点击**非叶子节点** → 右侧打开 AI 对话（引擎层），可自由追问，带上下文。
@@ -133,7 +134,8 @@ cmd /c npm run dev
 - `src/components/SettingsModal.jsx`：API Key / Base / Model 配置弹窗
 - `src/services/llm.js`：统一 AI 调用封装（OpenAI 兼容）
 - `src/services/storage.js`：localStorage 设置读写 + 多学科学业数据持久化（含旧数据迁移）
-- `src/prompts.js`：三套冻结的系统提示词（生成图谱 / 对话 / 卡片）
+- `src/services/fileParser.js`：文件解析服务（txt / pdf / docx / pptx → 纯文本）
+- `src/prompts.js`：三套冻结的系统提示词（生成图谱 / 对话 / 卡片）+ 带参考资料的图谱提示词
 - `src/utils/graphValidator.js`：AI 返回图谱 JSON 的校验器
 - `src/data/mockGraph.js`：演示用三层图谱数据（Phase 0 遗留，可删）
 - `src/constants.js`：冻结的色值、状态、节点半径常量
@@ -142,6 +144,19 @@ cmd /c npm run dev
 
 - 纯前端方案，无自动跨设备同步；但通过「导出 / 导入备份」可手动迁移（见上）。
 - **多人共用时需各自带 API Key**：数据存各人浏览器 localStorage，每个体验者需在自己浏览器的「⚙ 设置」里填自己的 阿里云百炼 Key 才能生成图谱/对话/卡片。内测时请提前告知体验者这一点。
+- **上传资料的限制**：扫描版 PDF（图片型）无法提取文字；资料超过 8000 字会自动截断（避免超出模型上下文限制）；PPT 解析提取的是文字内容，不保留排版和图片。
+
+## 代码备份（Git）
+
+项目已初始化 Git 仓库，本地有完整提交历史。推送到 GitHub 远程备份的步骤：
+1. 在 github.com 注册账号（如已有跳过）。
+2. 新建一个仓库（如 `three-layer-learning`），**不要勾选** README / .gitignore / license（本地已有）。
+3. 在项目根目录终端执行（替换成你的仓库地址）：
+   ```powershell
+   git remote add origin https://github.com/你的用户名/three-layer-learning.git
+   git push -u origin master
+   ```
+4. 之后每次改完代码，`git add -A && git commit -m "说明"` 再 `git push` 即可备份。
 
 ## 部署上线（让他人也能打开）
 
